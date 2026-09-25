@@ -6,19 +6,40 @@
 
 ## How it works
 
-`jev run` wraps your shell in a PTY, streams stdout/stderr, and matches known error patterns (rustc, cargo test, node, python, go). On a hit it:
+Two flows, same pipeline (detect → context → AI/mock → save to `.jev/last-patch.json`):
 
-1. collects context (project kind, `git diff`, file slice around the error line),
-2. asks AI (Anthropic, or offline `mock` when no key is set),
-3. saves the suggestion to `.jev/last-patch.json`,
-4. notifies you in-terminal.
+**A. Without nesting (recommended): run one command under `jev`.**
+No wrapped shell, no second terminal confusion:
 
-In another terminal (or after exit):
+```bash
+jev exec -- cargo test
+jev exec -- python broken.py
+```
+
+Output streams live, the exit code is propagated, and on an error
+pattern you get a patch hint right away. Then as usual:
 
 ```bash
 jev show    # view the proposal
 jev apply   # hunk-by-hunk apply with .jev-bak backup
 jev undo    # restore from backup
+```
+
+Piped output works too:
+
+```bash
+cargo test 2>&1 | jev check --exit-code 1
+```
+
+**B. Interactive PTY wrap:** `jev run` wraps your shell and watches all
+output. Heavier (nested shell); use it only for long sessions.
+
+Shell helper (defines `jev-run`, a wrapper that captures failures for
+`jev check` — PowerShell, bash, zsh):
+
+```bash
+jev install-hook --shell powershell   # print snippet
+jev install-hook --shell bash --write # append to ~/.bashrc
 ```
 
 No key? No problem — mock mode lets you demo the full pipeline offline.
@@ -61,10 +82,12 @@ Patches are applied **hunk-by-hunk** with `diffy` (never raw overwrite), paths a
 
 ```
 src/
-├── main.rs        # CLI: run / show / apply / undo / install-hook
+├── main.rs        # CLI: run / exec / check / show / apply / undo / install-hook
 ├── pty/           # PTY wrap, passthrough, resize, analyzer loop
-├── errors/        # heuristic detectors (rust/node/python/go) + ANSI stripping
-├── context/       # project-kind + truncated git diff + file slice
+├── hook.rs        # non-PTY flows: exec, check, shell snippets
+├── pipeline.rs    # shared detect→context→suggest→save pipeline
+├── errors/        # heuristic detectors (rust/node/python/go/java) + ANSI stripping
+├── context/       # project-kind + staged/unstaged/untracked diff + file slice
 ├── ai/            # PatchProvider trait, AnthropicClient, MockProvider
 └── tui/           # diff view + hunk apply + patch store (.jev/)
 ```
@@ -75,8 +98,8 @@ src/
 - [x] hunk-by-hunk patch apply (`diffy`) + backup + `undo`
 - [x] end-to-end pipeline (detect → context → mock/anthropic → save → notify)
 - [x] `show` / `apply` / `undo` commands
+- [x] non-PTY flows: `exec`, `check` (pipe/file), `install-hook` (`jev-run` for powershell/bash/zsh)
 - [ ] live TUI overlay (currently conflicts with transparent passthrough — by design deferred)
-- [ ] shell-hook mode (`PROMPT_COMMAND` / `precmd`) for non-PTY use
 - [ ] more providers (OpenAI, Ollama/local)
 - [ ] asciinema demo + `cargo install` release binaries
 

@@ -8,10 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::ai::client::make_provider;
-use crate::context::collector;
 use crate::errors::detector;
-use crate::tui::actions::save_suggestion;
+use crate::pipeline::{analyze_and_suggest, provider_name};
+use crate::tui::actions::patch_store_path;
 
 /// RAII guard that disables terminal raw mode on every exit path
 /// (success, error, or panic). Without this, a Jev crash would leave
@@ -52,6 +51,10 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
         shell,
         cwd.display()
     );
+    // Mark the window/tab title so the nested shell is distinguishable
+    // from the outer one (their prompts look identical otherwise).
+    print!("\x1b]0;[jev] {}\x07", cwd.display());
+    let _ = std::io::Write::flush(&mut std::io::stdout());
 
     let (initial_cols, initial_rows) = crossterm::terminal::size().unwrap_or((80, 24));
 
@@ -192,38 +195,25 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
             last_snippet = finding.raw_snippet.clone();
 
             let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let ctx = match collector::collect(&root, &finding) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprint!("\r\n[jev] context collection failed: {:#}\r\n", e);
-                    buffer.clear();
-                    continue;
-                }
-            };
-
-            let (provider, provider_name) = make_provider();
             let patch_result = match &rt {
-                Ok(rt) => rt.block_on(provider.suggest_patch(&finding, &ctx)),
+                Ok(rt) => rt.block_on(analyze_and_suggest(&root, &finding)),
                 Err(e) => Err(anyhow::anyhow!("failed to build runtime: {:#}", e)),
             };
 
             match patch_result {
                 Ok(patch) => {
-                    match save_suggestion(&root, &patch) {
-                        Ok(path) => eprint!(
-                            "\r\n[jev] [{:?}/{:?}] error in {} -> patch ready ({})\r\n   {} \r\n   Run: `jev show` to view, `jev apply` to apply, `jev undo` to revert\r\n   File: {}\r\n",
-                            finding.toolchain,
-                            ctx.project_kind.as_deref().unwrap_or("unknown"),
-                            finding.file_hint.as_deref().unwrap_or("?"),
-                            provider_name,
-                            patch.explanation,
-                            path.display(),
-                        ),
-                        Err(e) => eprint!("\r\n[jev] saving the patch failed: {:#}\r\n", e),
-                    }
+                    let path = patch_store_path(&root);
+                    eprint!(
+                        "\r\n[jev] [{:?}] error in {} -> patch ready ({})\r\n   {} \r\n   Run: `jev show` to view, `jev apply` to apply, `jev undo` to revert\r\n   File: {}\r\n",
+                        finding.toolchain,
+                        finding.file_hint.as_deref().unwrap_or("?"),
+                        provider_name(),
+                        patch.explanation,
+                        path.display(),
+                    )
                 }
                 Err(e) => {
-                    eprint!("\r\n[jev] patch generation failed: {:#}\r\n", e);
+                    eprint!("\r\n[jev] patch pipeline failed: {:#}\r\n", e);
                 }
             }
             buffer.clear();
