@@ -6,6 +6,7 @@ pub enum Toolchain {
     Node,
     Python,
     Go,
+    Java,
     #[allow(dead_code)]
     Unknown,
 }
