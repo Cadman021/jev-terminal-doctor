@@ -7,36 +7,36 @@ mod tui;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-/// jev-terminal-doctor — دستیار زنده و خودکار ترمینال
+/// jev-terminal-doctor — live terminal assistant
 #[derive(Parser)]
 #[command(
     name = "jev",
     version,
-    about = "دستیار خودکار ترمینال برای تشخیص و پچ خطاها"
+    about = "Automatic terminal assistant for detecting and patching errors"
 )]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// شلی که باید wrap بشه (پیش‌فرض: $SHELL کاربر)
+    /// Shell to wrap (default: user's $SHELL)
     #[arg(short, long)]
     shell: Option<String>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// اجرای دمون در حالت تعاملی (پیش‌فرض)
+    /// Run the daemon in interactive mode (default)
     Run,
-    /// نمایش آخرین پچ پیشنهادی ذخیره‌شده در .jev/
+    /// Show the last stored patch suggestion from .jev/
     Show,
-    /// اعمال آخرین پچ پیشنهادی (با بکاپ .jev-bak)
+    /// Apply the last patch suggestion (with .jev-bak backup)
     Apply,
-    /// برگرداندن آخرین اعمال (بازیابی از .jev-bak)
+    /// Revert the last apply (restore from .jev-bak)
     Undo {
-        /// مسیر فایل برای undo (پیش‌فرض: فایل داخل آخرین پچ)
+        /// File path for undo (default: file from the last patch)
         file: Option<String>,
     },
-    /// فقط نصب shell-hook بدون اجرای دمون (برای حالت دوم: precmd/PROMPT_COMMAND)
+    /// Install shell hook only, without running the daemon (precmd/PROMPT_COMMAND mode)
     InstallHook,
 }
 
@@ -47,13 +47,13 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Commands::Run) {
         Commands::Run => {
-            println!("🩺 jev-terminal-doctor در حال اجرا... (Ctrl+C برای خروج)");
+            println!("jev-terminal-doctor is running... (Ctrl+C to exit)");
             pty::interceptor::run_wrapped_shell(cli.shell).await?;
         }
         Commands::Show => {
             let patch = tui::actions::load_suggestion(&root)?;
             println!(
-                "فایل: {}\nتوضیح: {}\n\n{}",
+                "File: {}\nExplanation: {}\n\n{}",
                 patch.file_path, patch.explanation, patch.unified_diff
             );
         }
@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
             let patch = tui::actions::load_suggestion(&root)?;
             let backup = tui::actions::apply_patch(&root, &patch)?;
             println!(
-                "✅ پچ روی {} اعمال شد (بکاپ: {})",
+                "Patch applied to {} (backup: {})",
                 patch.file_path,
                 backup.display()
             );
@@ -75,10 +75,10 @@ async fn main() -> Result<()> {
                 }
             };
             tui::actions::restore_backup(&target)?;
-            println!("↩️ {} به نسخه‌ی قبل از پچ برگشت", target.display());
+            println!("{} restored to the pre-patch version", target.display());
         }
         Commands::InstallHook => {
-            println!("نصب shell hook هنوز پیاده‌سازی نشده — TODO");
+            println!("Shell hook installation is not implemented yet — TODO");
         }
     }
 

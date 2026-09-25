@@ -3,7 +3,7 @@ name = "jev-terminal-doctor"
 version = "0.1.0"
 edition = "2021"
 description = "Live terminal assistant — detects build/test errors and prepares fix patches (jev ecosystem)"
-license = "MIT"
+license = "GPL-3.0-only"
 repository = "https://github.com/Cadman021/jev-terminal-doctor"
 readme = "README.md"
 keywords = ["terminal", "ai", "developer-tools", "cli", "jev"]
@@ -20,7 +20,7 @@ clap = { version = "4", features = ["derive"] }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# PTY handling — کنترل ترمینال زیرین و گرفتن stdout/stderr به‌صورت شفاف
+# PTY handling — control the underlying terminal and capture stdout/stderr transparently
 portable-pty = "0.8"
 
 # TUI
@@ -30,10 +30,10 @@ crossterm = "0.28"
 # Git diff / context
 git2 = "0.19"
 
-# HTTP client برای ai/client.rs
+# HTTP client for ai/client.rs
 reqwest = { version = "0.12", features = ["json", "stream"] }
 
-# سریالایز/دیسریالایز JSON
+# JSON serialization/deserialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -41,23 +41,23 @@ serde_json = "1"
 anyhow = "1"
 thiserror = "2"
 
-# رنگ و لاگ در ترمینال
+# Terminal colors and logging
 console = "0.15"
 
-# regex برای heuristic pattern-matching خطاها
+# Regex for heuristic error pattern-matching
 regex = "1"
 once_cell = "1"
 
-# async streams
+# Async streams
 futures = "0.3"
 
-# trait-based design برای ai::client (امکان تعویض provider در آینده)
+# Trait-based design for ai::client (swap providers in the future)
 async-trait = "0.1"
 
-# اعمال hunk-by-hunk پچ‌های unified diff (جلوگیری از overwrite مخرب فایل)
+# Hunk-by-hunk application of unified diffs (prevents destructive overwrite)
 diffy = "0.4"
 
-# حذف ANSI escape codes قبل از pattern-matching خطاها (خروجی cargo رنگی است)
+# Strip ANSI escape codes before error pattern-matching (cargo output is colored)
 strip-ansi-escapes = "0.2"
 
 [profile.release]

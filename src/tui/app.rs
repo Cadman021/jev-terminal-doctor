@@ -1,9 +1,9 @@
 use crate::ai::PatchSuggestion;
 
-/// وضعیت کلی رابط کاربری TUI. وقتی یک PatchSuggestion آماده می‌شود،
-/// این state از `Idle` به `ReviewingPatch` تغییر می‌کند و overlay دیف
-/// (diff_view) روی خروجی عادی ترمینال نمایش داده می‌شود.
-// deferred: live overlay با passthrough شفاف می‌جنگد؛ تا آن زمان allow.
+/// Overall TUI state. When a PatchSuggestion is ready, this state moves
+/// from `Idle` to `ReviewingPatch` and the diff overlay (diff_view) is
+/// shown on top of the normal terminal output.
+// Deferred: live overlay fights transparent passthrough; allow until then.
 #[allow(dead_code)]
 pub enum AppState {
     Idle,

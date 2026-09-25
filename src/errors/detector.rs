@@ -3,9 +3,9 @@ use regex::Regex;
 
 use super::{ErrorFinding, Toolchain};
 
-// الگوهای رایج خطا برای چند تولچین. این‌ها فقط نقطه‌ی شروع‌اند —
-// هدف این است که قبل از صرف هزینه‌ی API روی هر خط خروجی، فقط بلوک‌های
-// واقعاً مربوط به خطا به ai::client فرستاده شوند.
+// Common error patterns for several toolchains. These are only a starting
+// point — the goal is to forward only genuinely error-related blocks to
+// ai::client instead of spending API budget on every output line.
 static RUSTC_ERROR: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"error(?:\[E\d+\])?:.*\n\s*-->\s*(?P<file>[^:]+):(?P<line>\d+):\d+").unwrap()
 });
@@ -13,7 +13,8 @@ static RUSTC_ERROR: Lazy<Regex> = Lazy::new(|| {
 static CARGO_TEST_FAIL: Lazy<Regex> = Lazy::new(|| Regex::new(r"test .* \.\.\. FAILED").unwrap());
 
 static NODE_ERROR: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?:TypeError|ReferenceError|SyntaxError):.*\n\s*at .*\((?P<file>[^:]+):(?P<line>\d+):\d+\)").unwrap()
+    Regex::new(r"(?:TypeError|ReferenceError|SyntaxError):.*\n\s*at .*\((?P<file>[^:]+):(?P<line>\d+):\d+\)")
+        .unwrap()
 });
 
 static PYTHON_TRACEBACK: Lazy<Regex> = Lazy::new(|| {
@@ -23,14 +24,14 @@ static PYTHON_TRACEBACK: Lazy<Regex> = Lazy::new(|| {
 static GO_BUILD_ERROR: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?P<file>[\w./-]+\.go):(?P<line>\d+):\d+: .*").unwrap());
 
-/// بافر خروجی خام را برای الگوهای خطا اسکن می‌کند.
-/// اگر یک match قطعی پیدا شود، یک `ErrorFinding` برمی‌گرداند تا لایه بعدی
-/// (context::collector + ai::client) روی آن کار کند.
+/// Scan a raw output buffer for error patterns.
+/// Returns an `ErrorFinding` for the next stage
+/// (context::collector + ai::client) on a confident match.
 ///
-/// نکته: `raw_snippet` فقط ~4KB آخر بافر است، نه کل آن — تا هزینه‌ی API
-/// و لو رفتن اطلاعات محدود بماند.
+/// Note: `raw_snippet` is only the last ~4KB of the buffer, not all of
+/// it — this bounds API cost and information leakage.
 pub fn scan(buffer: &str) -> Option<ErrorFinding> {
-    // حذف ANSI قبل از match (خروجی cargo/pytest رنگی است)
+    // Strip ANSI before matching (cargo/pytest output is colored).
     let cleaned = strip_ansi_escapes::strip_str(buffer);
     let buf = cleaned.as_str();
     let snippet = tail_snippet(buf, 4000);
@@ -83,7 +84,7 @@ pub fn scan(buffer: &str) -> Option<ErrorFinding> {
     None
 }
 
-/// آخرین `max_chars` کاراکتر بافر (مرز ایمن روی char boundary).
+/// Return the last `max_chars` characters of the buffer (safe on char boundaries).
 fn tail_snippet(buf: &str, max_chars: usize) -> String {
     if buf.len() <= max_chars {
         return buf.to_string();
@@ -105,7 +106,7 @@ mod tests {
     #[test]
     fn detects_rustc_error() {
         let sample = "error[E0308]: mismatched types\n  --> src/main.rs:10:5\n";
-        let finding = scan(sample).expect("باید تشخیص داده شود");
+        let finding = scan(sample).expect("should be detected");
         assert_eq!(finding.toolchain, Toolchain::Rust);
         assert_eq!(finding.file_hint.as_deref(), Some("src/main.rs"));
         assert_eq!(finding.line_hint, Some(10));

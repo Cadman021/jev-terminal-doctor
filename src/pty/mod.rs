@@ -1,7 +1,7 @@
 pub mod interceptor;
 
-/// یک خروجی خام که از ترمینال گرفته شده، پیش از تحلیل
-/// (فعلاً رزرو برای overlay زنده؛ با allow تا CI سبز بماند)
+/// Raw output captured from the terminal, before analysis.
+/// (Currently reserved for the live overlay; allow keeps CI green.)
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RawOutput {

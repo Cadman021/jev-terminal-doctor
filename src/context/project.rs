@@ -1,8 +1,8 @@
 use std::path::Path;
 
-/// نوع پروژه را از روی وجود فایل‌های مشخصه در ریشه‌ی مسیر تشخیص می‌دهد.
-/// این خیلی حیاتی است چون تشخیص خطا (errors::detector) و انتخاب پرامپت
-/// مناسب برای AI به تولچین بستگی دارد.
+/// Detect the project kind from marker files in the root directory.
+/// This matters because error detection (errors::detector) and prompt
+/// selection for the AI depend on the toolchain.
 pub fn detect_project_kind(root: &Path) -> Option<&'static str> {
     let markers: &[(&str, &str)] = &[
         ("Cargo.toml", "cargo"),

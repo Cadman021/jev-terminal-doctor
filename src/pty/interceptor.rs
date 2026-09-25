@@ -13,10 +13,10 @@ use crate::context::collector;
 use crate::errors::detector;
 use crate::tui::actions::save_suggestion;
 
-/// RAII guard که raw mode ترمینال را در هر مسیر خروجی (موفق، خطا یا panic)
-/// دوباره غیرفعال می‌کند. بدون این، اگر Jev کرش کند، شل کاربر در حالت raw
-/// می‌ماند و ترمینال خراب به‌نظر می‌رسد — یک باگ کلاسیک و آزاردهنده در
-/// همه‌ی ابزارهای PTY-wrapping.
+/// RAII guard that disables terminal raw mode on every exit path
+/// (success, error, or panic). Without this, a Jev crash would leave
+/// the user's shell in raw mode and the terminal would look broken —
+/// a classic, annoying bug in all PTY-wrapping tools.
 struct RawModeGuard;
 
 impl RawModeGuard {
@@ -32,14 +32,14 @@ impl Drop for RawModeGuard {
     }
 }
 
-/// اجرای شل کاربر داخل یک PTY، به‌طوری‌که Jev بین کاربر و شل واقعی
-/// می‌نشیند و خروجی را رصد می‌کند بدون این‌که تعامل عادی کاربر مختل شود.
+/// Run the user's shell inside a PTY so Jev sits between the user and
+/// the real shell, watching output without disturbing normal interaction.
 ///
-/// این نسخه سه مسیر موازی دارد:
-/// ۱. stdin کاربر → نوشته می‌شود در pty master (تایپ عادی کار می‌کند)
-/// ۲. خروجی pty master → چاپ می‌شود در stdout واقعی + بافر می‌شود برای تحلیل
-/// ۳. تغییر اندازه‌ی ترمینال کاربر → به pty منتقل می‌شود (ابزارهایی مثل
-///    vim/htop داخل شل wrapped درست رندر می‌شوند)
+/// Three parallel paths:
+/// 1. User stdin -> written into the pty master (normal typing works)
+/// 2. Pty master output -> printed to the real stdout + buffered for analysis
+/// 3. User terminal resizes -> forwarded to the pty (tools like
+///    vim/htop render correctly inside the wrapped shell)
 pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
     let shell = shell_override
         .or_else(|| std::env::var("SHELL").ok())
@@ -62,17 +62,18 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
     })?;
 
     let mut cmd = CommandBuilder::new(&shell);
-    cmd.env("JEV_ACTIVE", "1"); // برای این‌که خود Jev بتواند تشخیص بدهد داخل چه شلی است
+    // Lets Jev detect which shell it is inside of.
+    cmd.env("JEV_ACTIVE", "1");
     let mut child = pair.slave.spawn_command(cmd)?;
     drop(pair.slave);
 
-    // raw mode باید فعال شود تا کلیدهایی مثل Ctrl+C, arrow keys و ... مستقیم
-    // به شل زیرین برسند نه این‌که خود ترمینال محلی پردازششان کند
+    // Raw mode must be enabled so keys like Ctrl+C and arrow keys reach
+    // the underlying shell instead of being handled by the local terminal.
     let _raw_guard = RawModeGuard::enable()?;
 
     let running = Arc::new(AtomicBool::new(true));
 
-    // ---------- ۱. فوروارد stdin کاربر به pty ----------
+    // ---------- 1. Forward user stdin to the pty ----------
     let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
     let writer_for_stdin = Arc::clone(&writer);
     let running_for_stdin = Arc::clone(&running);
@@ -94,7 +95,7 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
         }
     });
 
-    // ---------- ۲. خواندن خروجی pty، چاپ به کاربر، و تحلیل برای خطا ----------
+    // ---------- 2. Read pty output, print it, and analyze it for errors ----------
     let mut reader = pair.master.try_clone_reader()?;
     let (tx, rx) = channel::<String>();
     let running_for_reader = Arc::clone(&running);
@@ -116,7 +117,7 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
         running_for_reader.store(false, Ordering::SeqCst);
     });
 
-    // ---------- ۳. رصد تغییر اندازه‌ی ترمینال و انتقال آن به pty ----------
+    // ---------- 3. Watch terminal resizes and forward them to the pty ----------
     let master_for_resize = pair.master;
     let running_for_resize = Arc::clone(&running);
     let resize_thread = thread::spawn(move || {
@@ -137,10 +138,11 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
         }
     });
 
-    // ---------- تحلیل‌گر: بافر می‌کند، خطا را تشخیص می‌دهد و پایپ‌لاین کامل را اجرا می‌کند ----------
-    // detect -> collect context -> suggest patch (anthropic یا mock) -> save to .jev/ -> notify
-    // عمداً overlay زنده نداریم (با passthrough شفاف PTY می‌جنگد)؛ در عوض پچ در
-    // `.jev/last-patch.json` ذخیره می‌شود و کاربر در ترمینال دیگر `jev show/apply` می‌زند.
+    // ---------- Analyzer: buffer output, detect errors, run the full pipeline ----------
+    // detect -> collect context -> suggest patch (anthropic or mock) -> save to .jev/ -> notify.
+    // There is intentionally no live overlay (it fights transparent PTY
+    // passthrough); instead the patch is stored in `.jev/last-patch.json`
+    // and the user runs `jev show/apply` in another terminal.
     let analyzer_thread = thread::spawn(move || {
         let mut buffer = String::new();
         let mut last_trigger = std::time::Instant::now()
@@ -148,7 +150,7 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
             .unwrap_or_else(std::time::Instant::now);
         let mut last_snippet = String::new();
 
-        // ران‌تایم جدا برای صدا زدن provider ناهمگام از داخل thread همگام
+        // Separate runtime for calling the async provider from a sync thread.
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build();
@@ -158,7 +160,7 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
 
         while let Ok(chunk) = rx.recv() {
             buffer.push_str(&chunk);
-            // پنجره‌ی لغزان: فقط 32KB آخر نگه داشته می‌شود
+            // Sliding window: keep only the last 32KB.
             if buffer.len() > MAX_BUF {
                 let mut cut = buffer.len() - MAX_BUF;
                 while cut < buffer.len() && !buffer.is_char_boundary(cut) {
@@ -171,7 +173,7 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
                 continue;
             };
 
-            // dedup: همان خطای قبلی را پشت سر هم گزارش نکن
+            // Dedup: do not report the same error over and over.
             if finding.raw_snippet == last_snippet && last_trigger.elapsed() < COOLDOWN * 4 {
                 buffer.clear();
                 continue;
@@ -186,7 +188,7 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
             let ctx = match collector::collect(&root, &finding) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprint!("\r\n⚠️ Jev: جمع‌آوری کانتکست ناموفق بود: {:#}\r\n", e);
+                    eprint!("\r\n[jev] context collection failed: {:#}\r\n", e);
                     buffer.clear();
                     continue;
                 }
@@ -195,14 +197,14 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
             let (provider, provider_name) = make_provider();
             let patch_result = match &rt {
                 Ok(rt) => rt.block_on(provider.suggest_patch(&finding, &ctx)),
-                Err(e) => Err(anyhow::anyhow!("ساخت ران‌تایم ناموفق بود: {:#}", e)),
+                Err(e) => Err(anyhow::anyhow!("failed to build runtime: {:#}", e)),
             };
 
             match patch_result {
                 Ok(patch) => {
                     match save_suggestion(&root, &patch) {
                         Ok(path) => eprint!(
-                            "\r\n🔎 Jev [{:?}/{:?}] خطا در {} → پچ آماده شد ({})\r\n   {} \r\n   اجرا: `jev show` برای دیدن، `jev apply` برای اعمال، `jev undo` برای بازگشت\r\n   فایل: {}\r\n",
+                            "\r\n[jev] [{:?}/{:?}] error in {} -> patch ready ({})\r\n   {} \r\n   Run: `jev show` to view, `jev apply` to apply, `jev undo` to revert\r\n   File: {}\r\n",
                             finding.toolchain,
                             ctx.project_kind.as_deref().unwrap_or("unknown"),
                             finding.file_hint.as_deref().unwrap_or("?"),
@@ -210,26 +212,26 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
                             patch.explanation,
                             path.display(),
                         ),
-                        Err(e) => eprint!("\r\n⚠️ Jev: ذخیره‌ی پچ ناموفق بود: {:#}\r\n", e),
+                        Err(e) => eprint!("\r\n[jev] saving the patch failed: {:#}\r\n", e),
                     }
                 }
                 Err(e) => {
-                    eprint!("\r\n⚠️ Jev: تولید پچ ناموفق بود: {:#}\r\n", e);
+                    eprint!("\r\n[jev] patch generation failed: {:#}\r\n", e);
                 }
             }
             buffer.clear();
         }
     });
 
-    // منتظر خروج فرزند (شل) می‌مانیم — این پایان طبیعی جلسه است
+    // Wait for the child (shell) to exit — the natural end of the session.
     let _ = tokio::task::spawn_blocking(move || child.wait()).await?;
 
     running.store(false, Ordering::SeqCst);
     let _ = output_thread.join();
     let _ = resize_thread.join();
     let _ = analyzer_thread.join();
-    // stdin_thread معمولاً روی stdin.read() بلاک مانده؛ آن را detach می‌کنیم
-    // تا منتظرش نمانیم (وقتی فرآیند اصلی خارج شود، خودش هم می‌میرد)
+    // stdin_thread is usually blocked on stdin.read(); detach it instead of
+    // waiting (it dies with the main process on exit).
     drop(stdin_thread);
 
     Ok(())

@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an idea for jev-terminal-doctor
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow pain does this solve? (e.g. detector misses X, provider Y needed)
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should jev do? CLI shape, e.g. `jev fix --dry-run`.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [detector, context, ai-provider, pty, tui, cli, docs, other]
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches or workarounds you tried.

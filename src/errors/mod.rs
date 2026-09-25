@@ -14,7 +14,7 @@ pub enum Toolchain {
 pub struct ErrorFinding {
     pub toolchain: Toolchain,
     pub raw_snippet: String,
-    /// مسیر فایل و شماره خطی که کامپایلر/تست‌رانر گزارش داده (اگر قابل parse بود)
+    /// File path and line number reported by the compiler/test runner (if parseable).
     pub file_hint: Option<String>,
     pub line_hint: Option<u32>,
 }

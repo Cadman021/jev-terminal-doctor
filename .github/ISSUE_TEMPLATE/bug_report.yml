@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a reproducible bug in jev-terminal-doctor
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+      placeholder: jev apply corrupted my file / jev run did not detect the error...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps, commands, and sample error output.
+      placeholder: |
+        1. cargo run -- run
+        2. cargo test (fails with ...)
+        3. cargo run -- show
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `jev --version` or the commit hash.
+      placeholder: v0.1.0 / 7897dca
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [Linux, macOS, Windows]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste relevant terminal output, .jev/last-patch.diff, or error messages.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I reviewed the patch with `jev show` before `jev apply`
+        - label: I am attaching a minimal reproduction (not my whole repo)

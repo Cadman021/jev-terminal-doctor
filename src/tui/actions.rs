@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::ai::PatchSuggestion;
 
-// deferred: برای overlay زنده نگه داشته شده؛ allow تا CI سبز بماند.
+// Deferred: kept for the live overlay; allow keeps CI green.
 #[allow(dead_code)]
 pub enum UserAction {
     Apply,
@@ -12,8 +12,8 @@ pub enum UserAction {
     Dismiss,
 }
 
-/// کلید فشرده‌شده توسط کاربر را به یک UserAction ترجمه می‌کند.
-/// Ctrl+F برای Apply (fix)، Ctrl+E برای Edit، Esc برای Dismiss.
+/// Map a pressed key to a UserAction.
+/// Ctrl+F = Apply (fix), Ctrl+E = Edit, Esc = Dismiss.
 #[allow(dead_code)]
 pub fn map_key(key: crossterm::event::KeyEvent) -> Option<UserAction> {
     use crossterm::event::{KeyCode, KeyModifiers};
@@ -26,85 +26,85 @@ pub fn map_key(key: crossterm::event::KeyEvent) -> Option<UserAction> {
     }
 }
 
-/// اعمال پچ روی فایل هدف به‌صورت hunk-by-hunk.
+/// Apply a patch to the target file, hunk by hunk.
 ///
-/// - مسیر `patch.file_path` باید نسبی و داخل `root` باشد (جلوگیری از path traversal).
-/// - قبل از هر تغییری یک بکاپ `<file>.jev-bak` گرفته می‌شود.
-/// - `patch.unified_diff` باید یک unified diff معتبر باشد؛ در غیر این صورت
-///   هیچ چیزی نوشته نمی‌شود و خطا برمی‌گردد (برخلاف نسخه‌ی قبلی که متن diff
-///   را مستقیم داخل فایل سورس می‌نوشت و آن را خراب می‌کرد).
+/// - `patch.file_path` must be relative and inside `root` (path traversal protection).
+/// - A `<file>.jev-bak` backup is taken before any change.
+/// - `patch.unified_diff` must be a valid unified diff; otherwise nothing
+///   is written and an error is returned (unlike the old version, which
+///   wrote raw diff text into the source file and corrupted it).
 pub fn apply_patch(root: &Path, patch: &PatchSuggestion) -> Result<PathBuf> {
     let target = resolve_target(root, &patch.file_path)?;
 
     if patch.unified_diff.trim().is_empty() {
-        bail!("پچ خالی است — چیزی برای اعمال وجود ندارد");
+        bail!("Patch is empty — nothing to apply");
     }
 
     let original = if target.exists() {
         fs::read_to_string(&target)
-            .with_context(|| format!("خواندن فایل هدف ناموفق بود: {}", target.display()))?
+            .with_context(|| format!("Failed to read target file: {}", target.display()))?
     } else {
         String::new()
     };
 
     let parsed =
-        diffy::Patch::from_str(&patch.unified_diff).context("متن پچ یک unified diff معتبر نیست")?;
+        diffy::Patch::from_str(&patch.unified_diff).context("Patch is not a valid unified diff")?;
 
     if parsed.hunks().is_empty() {
-        bail!("متن پچ یک unified diff معتبر نیست (هیچ hunkای پیدا نشد)");
+        bail!("Patch is not a valid unified diff (no hunks found)");
     }
 
     let patched = diffy::apply(&original, &parsed)
-        .context("اعمال پچ روی فایل هدف ناموفق بود (context/hunk ناسازگار است)")?;
+        .context("Failed to apply patch to target file (incompatible context/hunk)")?;
 
-    // backup قبل از اعمال — بازگشت‌پذیری برای کاربر حیاتی است
+    // Backup before applying — reversibility is critical for users.
     let backup = backup_path_for(&target);
     if target.exists() {
         fs::copy(&target, &backup)
-            .with_context(|| format!("ساخت بکاپ ناموفق بود: {}", backup.display()))?;
+            .with_context(|| format!("Failed to create backup: {}", backup.display()))?;
     }
 
     if let Some(parent) = target.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent)
-                .with_context(|| format!("ساخت دایرکتوری والد ناموفق بود: {}", parent.display()))?;
+                .with_context(|| format!("Failed to create parent dir: {}", parent.display()))?;
         }
     }
     fs::write(&target, patched)
-        .with_context(|| format!("نوشتن فایل وصله‌شده ناموفق بود: {}", target.display()))?;
+        .with_context(|| format!("Failed to write patched file: {}", target.display()))?;
 
     Ok(backup)
 }
 
-/// مسیر بکاپ برای یک فایل هدف: `<file>.jev-bak`
-/// مثال: `src/main.rs` -> `src/main.rs.jev-bak`
+/// Backup path for a target file: `<file>.jev-bak`.
+/// Example: `src/main.rs` -> `src/main.rs.jev-bak`
 pub fn backup_path_for(target: &Path) -> PathBuf {
     let mut s = target.as_os_str().to_owned();
     s.push(".jev-bak");
     PathBuf::from(s)
 }
 
-/// آخرین بکاپ را برمی‌گرداند (`jev undo`).
+/// Restore the last backup (`jev undo`).
 pub fn restore_backup(target: &Path) -> Result<()> {
     let backup = backup_path_for(target);
     if !backup.exists() {
-        bail!("بکاپی برای {} پیدا نشد", target.display());
+        bail!("No backup found for {}", target.display());
     }
-    fs::copy(&backup, target).with_context(|| "بازیابی بکاپ ناموفق بود")?;
+    fs::copy(&backup, target).with_context(|| "Failed to restore backup")?;
     Ok(())
 }
 
-/// مطمئن می‌شود مسیر پچ از `root` بیرون نمی‌زند.
+/// Make sure the patch path does not escape `root`.
 fn resolve_target(root: &Path, file_path: &str) -> Result<PathBuf> {
     let rel = Path::new(file_path);
     if rel.is_absolute() {
-        bail!("مسیر پچ باید نسبی باشد، نه مطلق: {}", file_path);
+        bail!("Patch path must be relative, not absolute: {}", file_path);
     }
     for comp in rel.components() {
         match comp {
-            Component::ParentDir => bail!("مسیر پچ نباید حاوی `..` باشد: {}", file_path),
+            Component::ParentDir => bail!("Patch path must not contain `..`: {}", file_path),
             Component::Prefix(_) | Component::RootDir => {
-                bail!("مسیر پچ نامعتبر است: {}", file_path)
+                bail!("Invalid patch path: {}", file_path)
             }
             _ => {}
         }
@@ -112,12 +112,12 @@ fn resolve_target(root: &Path, file_path: &str) -> Result<PathBuf> {
     Ok(root.join(rel))
 }
 
-/// محل ذخیره‌ی آخرین پچ پیشنهادی: `<root>/.jev/last-patch.json`
+/// Storage location of the last patch suggestion: `<root>/.jev/last-patch.json`
 pub fn patch_store_path(root: &Path) -> PathBuf {
     root.join(".jev").join("last-patch.json")
 }
 
-/// ذخیره‌ی پیشنهاد برای مصرف بین `run` و `show/apply` در ترمینال دیگر.
+/// Store a suggestion for consumption between `run` and `show/apply` in another terminal.
 pub fn save_suggestion(root: &Path, patch: &PatchSuggestion) -> Result<PathBuf> {
     let path = patch_store_path(root);
     if let Some(parent) = path.parent() {
@@ -125,7 +125,7 @@ pub fn save_suggestion(root: &Path, patch: &PatchSuggestion) -> Result<PathBuf> 
     }
     let json = serde_json::to_string_pretty(patch)?;
     fs::write(&path, json)?;
-    // نسخه‌ی خوانا برای انسان هم کنارش
+    // Human-readable copy next to it.
     let _ = fs::write(
         root.join(".jev").join("last-patch.diff"),
         &patch.unified_diff,
@@ -137,7 +137,7 @@ pub fn load_suggestion(root: &Path) -> Result<PatchSuggestion> {
     let path = patch_store_path(root);
     let data = fs::read_to_string(&path).with_context(|| {
         format!(
-            "پچی ذخیره نشده ({} پیدا نشد). اول `jev run` را اجرا کنید",
+            "No stored patch ({} not found). Run `jev run` first",
             path.display()
         )
     })?;
@@ -183,9 +183,9 @@ mod tests {
         let patched = fs::read_to_string(root.join(target_rel)).unwrap();
         assert!(patched.contains("let x: i32 = 42;"));
         assert!(patched.contains("fn main()"));
-        // بکاپ باید محتوای اصلی را داشته باشد
+        // Backup must hold the original content.
         assert_eq!(fs::read_to_string(backup).unwrap(), original);
-        // بازیابی باید برگرداند
+        // Restore must bring it back.
         restore_backup(&root.join(target_rel)).unwrap();
         assert_eq!(fs::read_to_string(root.join(target_rel)).unwrap(), original);
         let _ = fs::remove_dir_all(&root);
@@ -196,9 +196,9 @@ mod tests {
         let root = unique_dir("invalid");
         let target_rel = "a.txt";
         fs::write(root.join(target_rel), "hello\n").unwrap();
-        let err = apply_patch(&root, &suggestion(target_rel, "این diff نیست")).unwrap_err();
+        let err = apply_patch(&root, &suggestion(target_rel, "not a diff")).unwrap_err();
         assert!(format!("{:#}", err).contains("unified diff"));
-        // فایل نباید خراب شده باشد (باگ قبلی: متن diff داخل فایل نوشته می‌شد)
+        // The file must not be corrupted (old bug: diff text was written into the file).
         assert_eq!(
             fs::read_to_string(root.join(target_rel)).unwrap(),
             "hello\n"

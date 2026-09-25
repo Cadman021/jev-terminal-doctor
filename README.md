@@ -81,4 +81,4 @@ src/
 
 ## License
 
-MIT
+GPL-3.0-only — see [LICENSE](LICENSE).

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions / Questions
+    url: https://github.com/Cadman021/jev-terminal-doctor/discussions
+    about: Ask usage questions or share demos (not for bug reports).

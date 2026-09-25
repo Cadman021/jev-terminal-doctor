@@ -1,8 +1,10 @@
 pub mod collector;
 pub mod project;
 
-/// بافت جمع‌آوری‌شده‌ای که قرار است به AI فرستاده شود
-#[derive(Debug, Clone, Default)]
+use serde::{Deserialize, Serialize};
+
+/// Collected context that will be sent to the AI.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectContext {
     pub project_kind: Option<String>, // "cargo", "npm", "python-poetry", ...
     pub relevant_diff: Option<String>,

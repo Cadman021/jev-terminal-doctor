@@ -5,19 +5,19 @@ use std::path::Path;
 use super::{project, ProjectContext};
 use crate::errors::ErrorFinding;
 
-/// بر اساس یک ErrorFinding (که از errors::detector آمده)، بافت لازم برای
-/// ساختن یک پرامپت خوب برای AI را جمع می‌کند: نوع پروژه، دیف گیت فعلی
-/// (تغییرات commit‌نشده که احتمالاً باعث خطا شده‌اند) و محتوای فایل خطا.
+/// Build the context needed for a good AI prompt from an ErrorFinding
+/// (coming from errors::detector): project kind, current git diff
+/// (uncommitted changes that likely caused the error), and the error file.
 ///
-/// سقف‌ها (جلوگیری از انفجار توکن): diff حداکثر 8KB، هر فایل حداکثر
-/// 60 خط اطراف `line_hint` و حداکثر 6KB.
+/// Caps (prevent token blowups): diff max 8KB, each file max 60 lines
+/// around `line_hint` and max 6KB.
 pub fn collect(root: &Path, finding: &ErrorFinding) -> Result<ProjectContext> {
     let mut ctx = ProjectContext {
         project_kind: project::detect_project_kind(root).map(|s| s.to_string()),
         ..Default::default()
     };
 
-    // دیف تغییرات commit‌نشده — معمولاً همین چیزی است که خطا را ایجاد کرده
+    // Uncommitted-changes diff — usually what introduced the error.
     if let Ok(repo) = Repository::open(root) {
         if let Ok(diff_text) = diff_working_tree(&repo) {
             if !diff_text.trim().is_empty() {
@@ -26,7 +26,7 @@ pub fn collect(root: &Path, finding: &ErrorFinding) -> Result<ProjectContext> {
         }
     }
 
-    // محتوای فایلی که کامپایلر/تست‌رانر به آن اشاره کرده (برش اطراف خط)
+    // Content of the file the compiler/test runner pointed at (sliced around the line).
     if let Some(file_hint) = &finding.file_hint {
         let file_path = root.join(file_hint);
         if let Ok(content) = std::fs::read_to_string(&file_path) {
@@ -41,7 +41,7 @@ pub fn collect(root: &Path, finding: &ErrorFinding) -> Result<ProjectContext> {
     Ok(ctx)
 }
 
-/// `context_lines` خط قبل و بعد از `line_1based` را برمی‌گرداند.
+/// Return `context_lines` lines before and after `line_1based`.
 fn slice_around(
     content: &str,
     line_1based: usize,

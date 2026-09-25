@@ -8,8 +8,8 @@ use ratatui::{
 
 use crate::ai::PatchSuggestion;
 
-/// دیف را با رنگ‌بندی خطوط +/- (مثل git diff) در یک پنل overlay رسم می‌کند.
-// deferred تا حل تعارض با passthrough؛ allow برای سبز ماندن CI.
+/// Render the diff with +/- line coloring (like git diff) in an overlay panel.
+// Deferred until the passthrough conflict is resolved; allow keeps CI green.
 #[allow(dead_code)]
 pub fn render(frame: &mut Frame, area: Rect, patch: &PatchSuggestion) {
     let lines: Vec<Line> = patch
@@ -28,7 +28,7 @@ pub fn render(frame: &mut Frame, area: Rect, patch: &PatchSuggestion) {
         .collect();
 
     let title = format!(
-        " پچ پیشنهادی برای {} — {} ",
+        " Suggested patch for {} — {} ",
         patch.file_path, patch.explanation
     );
     let block = Block::default().borders(Borders::ALL).title(title);
