@@ -26,23 +26,34 @@ No key? No problem — mock mode lets you demo the full pipeline offline.
 ## Quickstart
 
 ```bash
-cargo build --release
+# Install (rebuild after each `git pull` so `jev` picks up fixes):
+cargo install --path .
+# ...or run without installing:
+# cargo run -- <command>
+
 # optional (without it, jev runs in mock/demo mode):
+# PowerShell: $env:ANTHROPIC_API_KEY="..."
 export ANTHROPIC_API_KEY=...
 export JEV_MODEL=claude-sonnet-4-6   # optional override
 
-# terminal 1:
-cargo run -- run
+# terminal 1 — starts a wrapped shell in the CURRENT directory:
+jev run
+# (override the shell if needed: jev run --shell powershell.exe)
 
 # cause an error in the wrapped shell, e.g.:
 #   cargo test
 #   python broken.py
 
-# terminal 2 (same repo):
-cargo run -- show
-cargo run -- apply
-cargo run -- undo
+# terminal 2 (same repo dir):
+jev show
+jev apply
+jev undo
 ```
+
+> Windows: `jev run` spawns PowerShell when the parent session is
+> PowerShell, otherwise `%COMSPEC%`. The wrapped shell starts in the
+> same directory and `exit` ends the session. If you see a stale
+> `jev` (old messages/behavior), reinstall with `cargo install --path .`.
 
 Patches are applied **hunk-by-hunk** with `diffy` (never raw overwrite), paths are confined to the repo root (`..`/absolute rejected), and every apply keeps a `<file>.jev-bak`.
 

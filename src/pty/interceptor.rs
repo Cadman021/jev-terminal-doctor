@@ -41,15 +41,17 @@ impl Drop for RawModeGuard {
 /// 3. User terminal resizes -> forwarded to the pty (tools like
 ///    vim/htop render correctly inside the wrapped shell)
 pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
-    let shell = shell_override
-        .or_else(|| std::env::var("SHELL").ok())
-        .unwrap_or_else(|| {
-            if cfg!(windows) {
-                std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
-            } else {
-                "/bin/bash".to_string()
-            }
-        });
+    let (shell, extra_args): (String, Vec<String>) = match shell_override {
+        Some(s) => (s, vec![]),
+        None => default_shell(),
+    };
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    println!(
+        "[jev] Wrapping '{}' in {} — type `exit` to leave (Ctrl+C goes to the shell).",
+        shell,
+        cwd.display()
+    );
 
     let (initial_cols, initial_rows) = crossterm::terminal::size().unwrap_or((80, 24));
 
@@ -62,6 +64,11 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
     })?;
 
     let mut cmd = CommandBuilder::new(&shell);
+    for arg in &extra_args {
+        cmd.arg(arg);
+    }
+    // Start the wrapped shell in the same directory, not the home dir.
+    cmd.cwd(&cwd);
     // Lets Jev detect which shell it is inside of.
     cmd.env("JEV_ACTIVE", "1");
     let mut child = pair.slave.spawn_command(cmd)?;
@@ -224,7 +231,7 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
     });
 
     // Wait for the child (shell) to exit — the natural end of the session.
-    let _ = tokio::task::spawn_blocking(move || child.wait()).await?;
+    let status = tokio::task::spawn_blocking(move || child.wait()).await??;
 
     running.store(false, Ordering::SeqCst);
     let _ = output_thread.join();
@@ -234,5 +241,34 @@ pub async fn run_wrapped_shell(shell_override: Option<String>) -> Result<()> {
     // waiting (it dies with the main process on exit).
     drop(stdin_thread);
 
+    // RawModeGuard drops here, terminal is back to normal — safe to print.
+    println!(
+        "[jev] Shell exited ({}). If a patch was prepared, run `jev show` / `jev apply` in the repo dir.",
+        status
+    );
+
     Ok(())
+}
+
+/// Pick a sensible default shell:
+/// - explicit `--shell` wins (handled by the caller),
+/// - on Unix respect `$SHELL`, fall back to `/bin/bash`,
+/// - on Windows prefer PowerShell when the parent session is PowerShell
+///   (`PSModulePath` set), otherwise fall back to `COMSPEC` (usually cmd).
+///   Spawning cmd for a PowerShell user is confusing (different prompt,
+///   different startup dir), so PowerShell comes first.
+fn default_shell() -> (String, Vec<String>) {
+    if let Ok(sh) = std::env::var("SHELL") {
+        if !sh.trim().is_empty() {
+            return (sh, vec![]);
+        }
+    }
+    if cfg!(windows) {
+        if std::env::var("PSModulePath").is_ok() {
+            return ("powershell.exe".to_string(), vec!["-NoLogo".to_string()]);
+        }
+        let comspec = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        return (comspec, vec![]);
+    }
+    ("/bin/bash".to_string(), vec![])
 }

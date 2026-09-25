@@ -47,7 +47,6 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Commands::Run) {
         Commands::Run => {
-            println!("jev-terminal-doctor is running... (Ctrl+C to exit)");
             pty::interceptor::run_wrapped_shell(cli.shell).await?;
         }
         Commands::Show => {
